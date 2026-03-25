@@ -1,0 +1,30 @@
+name: ClaudeStatusBar
+options:
+  bundleIdPrefix: com.claudestatus
+  deploymentTarget:
+    macOS: "12.0"
+  xcodeVersion: "15.0"
+  generateEmptyDirectories: true
+
+targets:
+  ClaudeStatusBar:
+    type: application
+    platform: macOS
+    sources:
+      - Sources
+    resources:
+      - Resources
+      - Assets.xcassets
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.claudestatus.CaudeStatusBar
+        PRODUCT_NAME: Claude Status Bar
+        MARKETING_VERSION: "1.0.0"
+        CURRENT_PROJECT_VERSION: "1"
+        INFOPLIST_FILE: Resources/Info.plist
+        CODE_SIGN_STYLE: Automatic
+        COMBINE_HIDPI_IMAGES: YES
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        LD_RUNPATH_SEARCH_PATHS: "@executable_path/../Frameworks"
+        SWIFT_VERSION: "5.9"
+        MACOSX_DEPLOYMENT_TARGET: "12.0"
