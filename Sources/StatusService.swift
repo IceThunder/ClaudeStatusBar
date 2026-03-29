@@ -1,4 +1,5 @@
 import Foundation
+import Security
 
 struct Component: Decodable {
     let name: String
@@ -188,5 +189,174 @@ class FoxcodeStatusService {
             }
         }
         heartbeatTask.resume()
+    }
+}
+
+// MARK: - ZENMUX Status Service
+
+struct ZenmuxSubscriptionDetail: Decodable {
+    let plan: ZenmuxPlan
+    let currency: String
+    let baseUsdPerFlow: Double
+    let effectiveUsdPerFlow: Double
+    let accountStatus: String
+    let quota5Hour: ZenmuxQuota
+    let quota7Day: ZenmuxQuota
+    let quotaMonthly: ZenmuxMonthlyQuota
+
+    enum CodingKeys: String, CodingKey {
+        case plan, currency
+        case baseUsdPerFlow = "base_usd_per_flow"
+        case effectiveUsdPerFlow = "effective_usd_per_flow"
+        case accountStatus = "account_status"
+        case quota5Hour = "quota_5_hour"
+        case quota7Day = "quota_7_day"
+        case quotaMonthly = "quota_monthly"
+    }
+}
+
+struct ZenmuxPlan: Decodable {
+    let tier: String
+    let amountUsd: Double
+    let interval: String
+    let expiresAt: String
+
+    enum CodingKeys: String, CodingKey {
+        case tier, interval
+        case amountUsd = "amount_usd"
+        case expiresAt = "expires_at"
+    }
+}
+
+struct ZenmuxQuota: Decodable {
+    let maxFlows: Double
+    let maxValueUsd: Double
+    let usedFlows: Double?
+    let remainingFlows: Double?
+    let usagePercentage: Double?
+    let resetsAt: String?
+    let usedValueUsd: Double?
+
+    enum CodingKeys: String, CodingKey {
+        case maxFlows = "max_flows"
+        case maxValueUsd = "max_value_usd"
+        case usedFlows = "used_flows"
+        case remainingFlows = "remaining_flows"
+        case usagePercentage = "usage_percentage"
+        case resetsAt = "resets_at"
+        case usedValueUsd = "used_value_usd"
+    }
+}
+
+struct ZenmuxMonthlyQuota: Decodable {
+    let maxFlows: Double
+    let maxValueUsd: Double
+
+    enum CodingKeys: String, CodingKey {
+        case maxFlows = "max_flows"
+        case maxValueUsd = "max_value_usd"
+    }
+}
+
+struct ZenmuxResponse: Decodable {
+    let success: Bool
+    let message: String?
+    let data: ZenmuxSubscriptionDetail?
+}
+
+class ZenmuxService {
+    static let shared = ZenmuxService()
+
+    private let apiURL = "https://zenmux.ai/api/v1/management/subscription/detail"
+    private let keychainService = "com.statusbar.zenmux"
+    private let keychainAccount = "management_key"
+
+    var hasAPIKey: Bool {
+        return getAPIKey() != nil
+    }
+
+    func getAPIKey() -> String? {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: keychainService,
+            kSecAttrAccount as String: keychainAccount,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne,
+            kSecUseOperationPrompt as String: "验证以访问 ZENMUX API Key"
+        ]
+
+        var result: AnyObject?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+
+        guard status == errSecSuccess, let data = result as? Data,
+              let key = String(data: data, encoding: .utf8), !key.isEmpty else {
+            return nil
+        }
+        return key
+    }
+
+    func saveAPIKey(_ key: String?) {
+        deleteAPIKey()
+
+        guard let key = key, !key.isEmpty,
+              let data = key.data(using: .utf8) else {
+            return
+        }
+
+        var error: Unmanaged<CFError>?
+        guard let accessControl = SecAccessControlCreateWithFlags(
+            nil,
+            kSecAttrAccessibleWhenUnlockedThisDeviceOnly,
+            .userPresence,
+            &error
+        ) else { return }
+
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: keychainService,
+            kSecAttrAccount as String: keychainAccount,
+            kSecValueData as String: data,
+            kSecAttrAccessControl as String: accessControl
+        ]
+
+        SecItemAdd(query as CFDictionary, nil)
+    }
+
+    func deleteAPIKey() {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: keychainService,
+            kSecAttrAccount as String: keychainAccount
+        ]
+        SecItemDelete(query as CFDictionary)
+    }
+
+    func fetchSubscription(completion: @escaping (ZenmuxSubscriptionDetail?) -> Void) {
+        guard let key = getAPIKey(),
+              let url = URL(string: apiURL) else {
+            completion(nil)
+            return
+        }
+
+        var request = URLRequest(url: url)
+        request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
+
+        URLSession.shared.dataTask(with: request) { data, response, error in
+            guard error == nil, let data = data else {
+                DispatchQueue.main.async { completion(nil) }
+                return
+            }
+
+            do {
+                let decoded = try JSONDecoder().decode(ZenmuxResponse.self, from: data)
+                if decoded.success, let detail = decoded.data {
+                    DispatchQueue.main.async { completion(detail) }
+                } else {
+                    DispatchQueue.main.async { completion(nil) }
+                }
+            } catch {
+                DispatchQueue.main.async { completion(nil) }
+            }
+        }.resume()
     }
 }
